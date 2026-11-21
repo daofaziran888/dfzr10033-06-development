@@ -18,7 +18,85 @@ SEED_ROWS: dict[str, list[dict[str, Any]]] = {
     "dataset_slice": [_seed(1, {"切片编号":"DATA-0001","源立方":"1","维度过筛":"region=CN","度量过滤":"revenue>0","切片标签":"active","行数统计":"500","创建人":"admin","最后刷新":"-"})],
     "drill_config": [_seed(1, {"路径编号":"DRIL-0001","起始维度":"region","目标维度":"city","下钻类型":"hierarchy","关联键":"region_id","跳转规则":"exact","展示模板":"table","最后使用":"-"})],
     "result_mart": [_seed(1, {"集市编号":"RESU-0001","集市名称":"结果集市样例","数据来源":"result_cache","主题域":"analytics","行数统计":"0","刷新周期":"manual","下游消费":"dashboard","最后刷新":"-"})],
-    "benchmark_set": [_seed(1, {"基线编号":"BENC-0001","基线名称":"基准集样例","数据范围":"2026-09","基线时段":"2026-09-01","对比维度":"region","指标数值":"1000","方差阈值":"0.1","锁定状态":"unlocked"})],
+    "benchmark_set": [
+        # 历史格式基线：扁平字段 + 字符串方差阈值，无结构化明细，由解析器兼容归一
+        _seed(1, {"基线编号":"BENC-0001","基线名称":"基准集样例（历史格式）","数据范围":"2026-09","基线时段":"2026-09-01","对比维度":"region","指标数值":"1000","方差阈值":"0.1","锁定状态":"unlocked"}),
+        # 新版结构化基线：锁定口径，含可追到地区的历史明细，阈值随版本快照保存
+        {"id": 2, "status": "已锁定", "pending": False, "abnormal": False,
+         "基线编号":"BENC-0002","基线名称":"月度区域销售额基线","数据范围":"2026-09","基线版本":"v1.1",
+         "dimensions":["region"],"聚合粒度":"region","interval":"P1M","统计区间":"P1M",
+         "period_start":"2026-09-01","period_end":"2026-09-30","适用范围":"ALL","方差阈值":"0.1",
+         "threshold_snapshot":0.1,"对比维度":"region","指标数值":"200","锁定状态":"locked",
+         "baseline_detail":[
+             {"dimensions":{"region":"东区"},"value":100.0},
+             {"dimensions":{"region":"西区"},"value":100.0},
+             {"dimensions":{"region":"全国"},"value":200.0},
+         ]},
+        # 历史锁定基线：只有全国总量，缺地区明细，等待同一期地区明细补录后还原比较
+        {"id": 3, "status": "已锁定", "pending": False, "abnormal": False,
+         "基线编号":"BENC-0003","基线名称":"月度区域销售额基线（缺地区明细）","数据范围":"2026-09","基线版本":"v1.0",
+         "dimensions":["region"],"聚合粒度":"region","interval":"P1M","统计区间":"P1M",
+         "period_start":"2026-09-01","period_end":"2026-09-30","适用范围":"ALL","方差阈值":"0.1",
+         "threshold_snapshot":0.1,"对比维度":"region","指标数值":"200","锁定状态":"locked",
+         "baseline_detail":[
+             {"dimensions":{"region":"全国"},"value":200.0},
+         ]},
+        # 含零分母单元的基线：南区基线为0，用于验证零分母不直接触发偏离告警
+        {"id": 4, "status": "已锁定", "pending": False, "abnormal": False,
+         "基线编号":"BENC-0004","基线名称":"月度区域销售额基线（含零基线单元）","数据范围":"2026-09","基线版本":"v1.1",
+         "dimensions":["region"],"聚合粒度":"region","interval":"P1M","统计区间":"P1M",
+         "period_start":"2026-09-01","period_end":"2026-09-30","适用范围":"ALL","方差阈值":"0.1",
+         "threshold_snapshot":0.1,"对比维度":"region","指标数值":"200","锁定状态":"locked",
+         "baseline_detail":[
+             {"dimensions":{"region":"东区"},"value":100.0},
+             {"dimensions":{"region":"西区"},"value":100.0},
+             {"dimensions":{"region":"南区"},"value":0.0},
+             {"dimensions":{"region":"全国"},"value":200.0},
+         ]},
+    ],
+    # 指标工厂登记的本期实际指标：口径字段与基线对齐，明细按维度单元存放
+    "metric_actual": [
+        # 东区增十、西区减十：全国合计不变（200），偏离率均为10%，未超过0.1阈值 => 无告警
+        {"id": 1, "status": "待比较", "pending": True, "abnormal": False,
+         "实际编号":"ACT-0001","指标编号":"METR-0001","维度列表":["region"],"聚合粒度":"region",
+         "统计区间":"P1M","期间开始":"2026-10-01","期间结束":"2026-10-31",
+         "actual_detail":[
+             {"dimensions":{"region":"东区"},"value":110.0},
+             {"dimensions":{"region":"西区"},"value":90.0},
+             {"dimensions":{"region":"全国"},"value":200.0},
+         ],"创建时间":"2026-11-01 09:00:00"},
+        # 阈值核对用：东区+12%、西区-12%，全国合计仍不变 => 地区负责人告警，总量报表不告警
+        {"id": 2, "status": "待比较", "pending": True, "abnormal": False,
+         "实际编号":"ACT-0002","指标编号":"METR-0001","维度列表":["region"],"聚合粒度":"region",
+         "统计区间":"P1M","期间开始":"2026-10-01","期间结束":"2026-10-31",
+         "actual_detail":[
+             {"dimensions":{"region":"东区"},"value":112.0},
+             {"dimensions":{"region":"西区"},"value":88.0},
+             {"dimensions":{"region":"全国"},"value":200.0},
+         ],"创建时间":"2026-11-01 09:05:00"},
+        # 本期统计维度变化：新增 category 维度且粒度变为 region,category => 粒度/列集合不可比
+        {"id": 3, "status": "待比较", "pending": True, "abnormal": False,
+         "实际编号":"ACT-0003","指标编号":"METR-0001","维度列表":["region","category"],"聚合粒度":"region,category",
+         "统计区间":"P1M","期间开始":"2026-10-01","期间结束":"2026-10-31",
+         "actual_detail":[
+             {"dimensions":{"region":"东区","category":"A"},"value":60.0},
+             {"dimensions":{"region":"东区","category":"B"},"value":50.0},
+             {"dimensions":{"region":"西区","category":"A"},"value":45.0},
+             {"dimensions":{"region":"西区","category":"B"},"value":45.0},
+         ],"创建时间":"2026-11-01 09:10:00"},
+        # 零分母场景：南区本期有值，验证零分母单元登记为不可计算而非偏离告警
+        {"id": 4, "status": "待比较", "pending": True, "abnormal": False,
+         "实际编号":"ACT-0004","指标编号":"METR-0001","维度列表":["region"],"聚合粒度":"region",
+         "统计区间":"P1M","期间开始":"2026-10-01","期间结束":"2026-10-31",
+         "actual_detail":[
+             {"dimensions":{"region":"东区"},"value":100.0},
+             {"dimensions":{"region":"西区"},"value":100.0},
+             {"dimensions":{"region":"南区"},"value":30.0},
+             {"dimensions":{"region":"全国"},"value":230.0},
+         ],"创建时间":"2026-11-01 09:15:00"},
+    ],
+    "comparability_check": [],
+    "deviation_record": [],
     "query_audit": [_seed(1, {"记录编号":"QUER-0001","查询语句":"SELECT * FROM demo","执行耗时":"100ms","扫描行数":"1000","返回行数":"10","数据来源":"query_federation","操作用户":"admin","查询时间":"2026-11-01"})],
     "cost_govern": [_seed(1, {"策略编号":"COST-0001","适用角色":"analyst","查询上限":"10000","并发上限":"10","月度配额":"100000","告警阈值":"80","限流动作":"monitor","生效时段":"2026-11"})],
     "freshness_mon": [_seed(1, {"规则编号":"FRES-0001","目标数据集":"all","SLA秒数":"3600","检测频率":"hourly","延迟阈值":"600","告警级别":"WARNING","触发次数":"0","最后检查":"-"})],
